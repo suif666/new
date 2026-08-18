@@ -4,8 +4,7 @@ print("汉化脚本 v3.3")
 -- 请在此按 ["英文原文"] = "中文翻译" 格式添加
 local Translations = {
     -- 示例: ["Home"] = "主页",
-    return {
-        ["WELCOME"] = "欢迎",
+    ["WELCOME"] = "欢迎",
         ["Free Key"] = "免费密钥",
         ["SERVER HOP"] = "跳转服务器",
         ["THIS SERVER"] = "此服务器",
@@ -296,7 +295,6 @@ local Translations = {
         ["THEME"] = "主题",
         ["Accent Colour"] = "强调色",
         ["Recolour the UI"] = "重新着色界面",
-    }
 }
 
 -- ===== 部分替换表（子串替换）=====
@@ -562,8 +560,8 @@ end)
 wait(0.5)
 
 -- ===== 加载外部脚本 =====
-local ScriptUrl = "这里填外部脚本"
-if ScriptUrl == "" or ScriptUrl == "https://vxsans.xyz/loader.lua" then
+local ScriptUrl = "https://vxsans.xyz/loader.lua"
+if ScriptUrl == "" then
     warn("[汉化] 外部脚本 URL 未填写，跳过外部脚本加载")
 else
     print("[汉化] 开始下载外部脚本...")
