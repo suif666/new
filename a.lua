@@ -1,5 +1,5 @@
 -- ============================================================
--- MultiSection 定位版：测试 Boreal 的 MultiSection 嵌套 Tab 链路
+-- Section 嵌套 Tab 定位版：测试 Boreal 的 win:Section + sec:Tab 链路
 -- 跑完自动复制结果到剪贴板，直接粘贴发给 AI
 -- ============================================================
 
@@ -49,18 +49,18 @@ safe("CreateWindow", function()
 	})
 end)
 
--- 3. 主 Tab
-safe("主Tab", function()
+-- 3. 主 Tab（win:Tab，侧边栏）
+safe("win:Tab主页", function()
 	mainTab = win:Tab({ Title = "主页", Icon = "house" })
 end)
 
--- 4. MultiSection（关键：主脚本"功能类"文件夹）
-safe("MultiSection功能", function()
-	sec = win:MultiSection({ Title = "功能", Icon = "folder", Opened = false })
+-- 4. win:Section（关键：主脚本"功能"文件夹，侧边栏 Section）
+safe("win:Section功能", function()
+	sec = win:Section({ Title = "功能", Icon = "folder", Opened = false })
 end)
 
--- 5. 子 Tab（关键：主脚本"玩家类"等）
-safe("子Tab", function()
+-- 5. sec:Tab（关键：Section 里的子 Tab）
+safe("sec:Tab子Tab", function()
 	t = sec:Tab({ Title = "玩家类", Icon = "user" })
 end)
 
@@ -69,17 +69,16 @@ safe("子Tab按钮", function()
 	t:Button({ Title = "测试按钮", Callback = function() end })
 end)
 
--- 7. 第二个 MultiSection（视觉类）
-safe("MultiSection视觉", function()
-	local sec2 = win:MultiSection({ Title = "视觉类", Icon = "palette", Opened = false })
+-- 7. 第二个 win:Section（视觉类）
+safe("win:Section视觉", function()
+	local sec2 = win:Section({ Title = "视觉类", Icon = "palette", Opened = false })
 	local t2 = sec2:Tab({ Title = "透视", Icon = "user" })
 	t2:Button({ Title = "测试2", Callback = function() end })
 end)
 
--- 8. Section（对照组，之前 demo 里是 OK 的）
-safe("Section对照", function()
-	local s = mainTab:Section({ Title = "分组", Opened = false })
-	s:Button({ Title = "分组按钮", Callback = function() end })
+-- 8. win:Tag（主脚本徽标）
+safe("win:Tag", function()
+	win:Tag({ Title = "free", Icon = "gem", Color = Color3.fromHex("#30ff6a"), Radius = 0 })
 end)
 
 -- 复制结果
