@@ -23,15 +23,15 @@ local win = WindUI:CreateWindow({
 
 local tab = win:Tab({ Title = "测试", Icon = "box" })
 
--- 每个元素用 pcall 包起来，失败就弹通知显示错误
+-- 每个元素用 pcall 包起来，结果打印到控制台（warn/print）
 local fails = {}
 local function safe(name, fn)
 	local ok, err = pcall(fn)
 	if ok then
-		WindUI:Notify({ Title = "✅ " .. name, Content = "创建成功", Icon = "check", Duration = 2 })
+		print("[✅ " .. name .. "] 创建成功")
 	else
 		fails[#fails + 1] = name .. " -> " .. tostring(err)
-		WindUI:Notify({ Title = "❌ " .. name, Content = tostring(err), Icon = "x", Duration = 6 })
+		warn("[❌ " .. name .. "] 创建失败: " .. tostring(err))
 	end
 end
 
@@ -90,7 +90,10 @@ end)
 
 task.wait(1)
 if #fails == 0 then
-	WindUI:Notify({ Title = "🎉 全部元素创建成功", Content = "13 个元素全部通过", Icon = "check", Duration = 4 })
+	print("[🎉 结果] 全部元素创建成功（13 个）")
 else
-	WindUI:Notify({ Title = "共 " .. #fails .. " 个失败", Content = "看上面的 ❌ 通知", Icon = "x", Duration = 6 })
+	warn("[⚠️ 结果] 共 " .. #fails .. " 个失败:")
+	for i, f in ipairs(fails) do
+		warn("  " .. f)
+	end
 end
