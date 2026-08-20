@@ -57,6 +57,11 @@ local function safe(name, fn)
 	else
 		fails[#fails + 1] = name
 		logWarn("[FAIL] " .. name .. " -> " .. tostring(err))
+		-- 打印完整调用栈，定位崩溃链
+		local trace = debug and debug.traceback
+		if trace then
+			logWarn("[TRACE] " .. name .. " 调用栈:\n" .. trace(tostring(err), 2))
+		end
 	end
 end
 
@@ -124,6 +129,15 @@ safe("Section", function()
 end)
 
 task.wait(1)
+
+-- Boreal 探针输出（_G.PB 缓冲）
+if _G.PB and #_G.PB > 0 then
+	log("========== Boreal 探针输出 ==========")
+	for i, v in ipairs(_G.PB) do
+		log(v)
+	end
+	log("========================================")
+end
 
 log("========================================")
 if #fails == 0 then
