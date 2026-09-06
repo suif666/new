@@ -1,4 +1,4 @@
-print("汉化脚本 v3.3")
+print("汉化脚本 v3.3 完整修复版")
 
 -- ===== 精确翻译表（整句完全匹配）=====
 -- 请在此按 ["英文原文"] = "中文翻译" 格式添加
@@ -323,70 +323,121 @@ local SystemUiNames = {
 local function isSystemUi(ui)
     if not ui or not ui.Name then return false end
     if SystemUiNames[ui.Name] then return true end
-    for _, v in pairs(SystemUiNames) do
-        if ui:FindFirstChild(v) then return true end
+    -- 检查祖先是否为系统 UI（原版误把布尔 true 传给 FindFirstChild，这里修正）
+    local parent = ui
+    while parent do
+        if SystemUiNames[parent.Name] then return true end
+        parent = parent.Parent
     end
     return false
 end
 
-local function safeGetText(child)
-    local t = child:FindFirstChildWhichIsA("TextBox") or child:FindFirstChildWhichIsA("TextLabel")
-    if t and t.Text and t.Text ~= "" and not isSystemUi(t) then
-        return t
-    end
-    return nil
+-- 判断字符串里是否已含中文字符（避免重复翻译）
+local function containsChinese(s)
+    return s and s:find("[\228-\233][\128-\191][\128-\191]") ~= nil
 end
 
+-- 递归收集 node 下所有可见的文本控件（TextBox/TextLabel/TextButton）
+-- 注意：node 可以是任意 Instance（包括 ScreenGui），不能只对 GuiObject 递归，
+-- 因为 ScreenGui 不是 GuiObject，但它的子级里全是 GuiObject。
+-- 系统 UI 过滤由调用方在根节点做（见 PollTranslateOnce），子树内无需重复检查
 local function getTextRecursive(node)
     local results = {}
-    if node:IsA("GuiObject") then
-        local t = safeGetText(node)
-        if t then table.insert(results, t) end
-        for _, c in ipairs(node:GetChildren()) do
-            table.move(results, 1, #results, #results + #getTableValues(getTextRecursive(c)), results)
+    -- 收集本节点自身（若它是文本控件）
+    if node:IsA("TextBox") or node:IsA("TextLabel") or node:IsA("TextButton") then
+        table.insert(results, node)
+    end
+    -- 递归子节点（对任意 Instance 都递归，UIListLayout/UICorner 等无子级自然返回空）
+    for _, c in ipairs(node:GetChildren()) do
+        local childResults = getTextRecursive(c)
+        for _, item in ipairs(childResults) do
+            table.insert(results, item)
         end
     end
     return results
 end
 
-local function getTextFromRoot(root)
-    local texts = {}
-    local nodes = getTextRecursive(root)
-    for _, node in ipairs(nodes) do
-        local text = tostring(node.Text)
-        if text and text ~= "" and text ~= "0" then
-            table.insert(texts, text)
-        end
-    end
-    return texts
-end
+-- ===== 真正翻译一个控件 =====
+local function TranslateObject(obj)
+    if not obj or not obj.Parent then return end
+    local text = obj.Text
+    if not text or text == "" or text == "0" then return end
+    if containsChinese(text) then return end  -- 已经翻译过就跳过
 
--- 轮询检测
-local PollingQueue = {}
-local LastTextState = {}
-local function PollText()
-    if not PlayerGui or PlayerGui:FindFirstChildOfClass("ScreenGui") == nil then return end
-    local root = PlayerGui:FindFirstChildOfClass("ScreenGui")
-    if not root then return end
-    local currentTexts = getTextFromRoot(root)
-    local curKey = table.concat(currentTexts, "||")
-    if curKey ~= LastTextState.Key then
-        LastTextState.Key = curKey
-        LastTextState.List = currentTexts
-        for _, text in ipairs(currentTexts) do
-            local found = false
-            for _, qItem in ipairs(PollingQueue) do
-                if qItem.Text == text then found = true; break end
+    local translated = nil
+
+    -- 1. 整句精确匹配
+    translated = Translations[text]
+
+    -- 2. 前缀匹配：翻译表里有些 key 以 "..." 结尾（如 "Evil Hello Kitty (defa..."）
+    --    如果实际文本以 key 去掉 "..." 的前缀开头，也算匹配
+    if not translated and #text > 3 then
+        for k, v in pairs(Translations) do
+            local isTrunc = k:sub(-3) == "..."
+            if isTrunc then
+                local prefix = k:sub(1, -4)
+                if text:sub(1, #prefix) == prefix then
+                    local tail = text:sub(#prefix + 1)
+                    -- 译文如果也带 ... 就去掉，然后接上实际剩余部分
+                    local vBase = v:sub(-3) == "..." and v:sub(1, -4) or v
+                    translated = vBase .. tail
+                    break
+                end
             end
-            if not found then table.insert(PollingQueue, {Text = text, Times = 1}) end
         end
     end
-end
-task.spawn(function()
-    while task.wait(0.5) do PollText() end
-end)
 
--- Hook模式（高性能）
+    -- 3. 子串部分替换
+    if not translated then
+        local t = text
+        local changed = false
+        for k, v in pairs(PartialTranslations) do
+            if k and k ~= "" and t:find(k, 1, true) then
+                t = t:gsub(k, v)
+                changed = true
+            end
+        end
+        if changed then translated = t end
+    end
+
+    if translated and translated ~= text then
+        obj.Text = translated
+    end
+end
+
+-- ===== 普通模式（轮询）: 真正扫描并翻译所有 GUI =====
+local function PollTranslateOnce()
+    -- 扫描 PlayerGui 全部子树（游戏/脚本 UI 都在这里）
+    if PlayerGui then
+        for _, obj in ipairs(getTextRecursive(PlayerGui)) do
+            pcall(TranslateObject, obj)
+        end
+    end
+    -- 扫描 CoreGui 下的非系统子树（有些执行器创建的 UI 在 CoreGui）
+    pcall(function()
+        for _, child in ipairs(CoreGui:GetChildren()) do
+            if not isSystemUi(child) then
+                for _, obj in ipairs(getTextRecursive(child)) do
+                    pcall(TranslateObject, obj)
+                end
+            end
+        end
+    end)
+end
+
+local PollingThreadActive = false
+local function StartPolling()
+    if PollingThreadActive then return end
+    PollingThreadActive = true
+    print("[汉化] 轮询翻译已启动（每 0.5 秒扫描一次）")
+    task.spawn(function()
+        while task.wait(0.5) do
+            pcall(PollTranslateOnce)
+        end
+    end)
+end
+
+-- ===== Hook模式（高性能，需执行器支持 HookText）=====
 local function ApplyHookTranslation()
     local hook = getgenv and getgenv().HookText or nil
     if not hook then
@@ -410,13 +461,17 @@ local function ApplyHookTranslation()
         originalSet(self, translated)
     end
     hooked = true
+    print("[汉化] Hook 翻译已挂载")
     return hooked
 end
 
 if UseHookTranslation then
     if not ApplyHookTranslation() then
         warn("[汉化] Hook 翻译失败，使用轮询模式")
+        StartPolling()
     end
+else
+    StartPolling()
 end
 
 -- ===== 加载外部脚本 =====
@@ -435,7 +490,18 @@ else
         warn("[汉化] 内容为空")
     else
         print("[汉化] 下载成功，长度：", #content)
-        local func, err = loadstring(content)
+        -- 兼容：若返回的是 HTML 包装页（paste-drop 之类），提取代码块
+        local code = content
+        if content:find("<", 1, true) and content:find("class=\"content\"", 1, true) then
+            local _, s = content:find("class=\"content\"", 1, true)
+            local _, e = content:find("</div>", s, true)
+            if e then
+                code = content:sub(s + 1, e - 1)
+                code = code:gsub("&quot;", '"'):gsub("&#39;", "'"):gsub("&amp;", "&")
+                print("[汉化] 已从 HTML 提取代码，长度：", #code)
+            end
+        end
+        local func, err = loadstring(code)
         if not func then
             warn("[汉化] 编译失败：", err)
         else
