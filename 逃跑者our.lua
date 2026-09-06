@@ -20,7 +20,7 @@ local Translations = {
     ["Eat Below HP Percent"] = "低于此血量%进食",
     ["Auto Repair Vehicle"] = "自动修理载具",
     ["Repair Below Health"] = "低于此生命值修理",
-    ["Crime"] = "犯罪",
+    ["Crime"] = "战斗",
     ["Kill Aura"] = "杀戮光环",
     ["Target NPCs"] = "目标NPC",
     ["Damage Per Hit"] = "每次伤害",
@@ -315,164 +315,187 @@ if not PlayerGui then
 end
 
 local SystemUiNames = {
-    RobloxGui=true,
-    PluginManagerGui=true,
-    InspectableClassList=true,
+    RobloxGui=true, PlayerList=true, Backpack=true, Chat=true, BubbleChat=true,
+    ExperienceChat=true, TextChatService=true, TopBar=true, Topbar=true, Health=true,
+    EmotesMenu=true, Chrome=true, InspectMenu=true, PurchasePrompt=true,
+    ScreenshotHud=true
 }
 
-local function isSystemUi(ui)
-    if not ui or not ui.Name then return false end
-    if SystemUiNames[ui.Name] then return true end
-    -- 检查祖先是否为系统 UI（原版误把布尔 true 传给 FindFirstChild，这里修正）
-    local parent = ui
-    while parent do
-        if SystemUiNames[parent.Name] then return true end
-        parent = parent.Parent
+local WatchedRoots, WatchedObjects, TranslatingObjects = setmetatable({},{__mode="k"}), setmetatable({},{__mode="k"}), setmetatable({},{__mode="k"})
+
+-- 转义 Lua pattern 特殊字符，让部分替换按字面匹配（用户填 [ % . 等不会崩）
+local function EscapePattern(s)
+    return (s:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%1"))
+end
+
+local function TranslateText(txt)
+    if type(txt) ~= "string" or txt == "" then return txt end
+    local clean = txt:gsub("<[^>]*>", ""):gsub("\r", ""):gsub("^%s+", ""):gsub("%s+$", "")
+
+    -- 1. 精确匹配（整句）
+    local exact = Translations[txt] or Translations[clean]
+    if exact then return exact end
+
+    -- 1b. 前缀匹配：翻译表有些 key 以 "..." 结尾（如 "Evil Hello Kitty (defa..."）
+    --     实际文本以该前缀开头也算命中（补全逃跑者r.lua 缺失的逻辑）
+    if #txt > 3 then
+        for k, v in pairs(Translations) do
+            if k:sub(-3) == "..." and txt:sub(1, #k - 3) == k:sub(1, #k - 3) then
+                local tail = txt:sub(#k - 2)
+                local vBase = v:sub(-3) == "..." and v:sub(1, -3) or v
+                return vBase .. tail
+            end
+        end
+    end
+
+    -- 2. 部分替换（子串，字面匹配）
+    --    先按 key 长度降序排序：长的先替换，避免 "User" 把 "UserId" 拆成 "用户Id"
+    local result = txt
+    local partialKeys = {}
+    for original in pairs(PartialTranslations) do
+        partialKeys[#partialKeys + 1] = original
+    end
+    table.sort(partialKeys, function(a, b) return #a > #b end)
+    for _, original in ipairs(partialKeys) do
+        result = result:gsub(EscapePattern(original), PartialTranslations[original])
+    end
+    return result
+end
+
+local function IsSysUI(obj)
+    while obj do
+        if SystemUiNames[obj.Name] then return true end
+        obj = obj.Parent
     end
     return false
 end
 
--- 判断字符串里是否已含中文字符（避免重复翻译）
-local function containsChinese(s)
-    return s and s:find("[\228-\233][\128-\191][\128-\191]") ~= nil
-end
-
--- 递归收集 node 下所有可见的文本控件（TextBox/TextLabel/TextButton）
--- 注意：node 可以是任意 Instance（包括 ScreenGui），不能只对 GuiObject 递归，
--- 因为 ScreenGui 不是 GuiObject，但它的子级里全是 GuiObject。
--- 系统 UI 过滤由调用方在根节点做（见 PollTranslateOnce），子树内无需重复检查
-local function getTextRecursive(node)
-    local results = {}
-    -- 收集本节点自身（若它是文本控件）
-    if node:IsA("TextBox") or node:IsA("TextLabel") or node:IsA("TextButton") then
-        table.insert(results, node)
-    end
-    -- 递归子节点（对任意 Instance 都递归，UIListLayout/UICorner 等无子级自然返回空）
-    for _, c in ipairs(node:GetChildren()) do
-        local childResults = getTextRecursive(c)
-        for _, item in ipairs(childResults) do
-            table.insert(results, item)
-        end
-    end
-    return results
-end
-
--- ===== 真正翻译一个控件 =====
-local function TranslateObject(obj)
-    if not obj or not obj.Parent then return end
-    local text = obj.Text
-    if not text or text == "" or text == "0" then return end
-    if containsChinese(text) then return end  -- 已经翻译过就跳过
-
-    local translated = nil
-
-    -- 1. 整句精确匹配
-    translated = Translations[text]
-
-    -- 2. 前缀匹配：翻译表里有些 key 以 "..." 结尾（如 "Evil Hello Kitty (defa..."）
-    --    如果实际文本以 key 去掉 "..." 的前缀开头，也算匹配
-    if not translated and #text > 3 then
-        for k, v in pairs(Translations) do
-            local isTrunc = k:sub(-3) == "..."
-            if isTrunc then
-                local prefix = k:sub(1, -4)
-                if text:sub(1, #prefix) == prefix then
-                    local tail = text:sub(#prefix + 1)
-                    -- 译文如果也带 ... 就去掉，然后接上实际剩余部分
-                    local vBase = v:sub(-3) == "..." and v:sub(1, -4) or v
-                    translated = vBase .. tail
-                    break
-                end
-            end
-        end
-    end
-
-    -- 3. 子串部分替换
-    if not translated then
-        local t = text
-        local changed = false
-        for k, v in pairs(PartialTranslations) do
-            if k and k ~= "" and t:find(k, 1, true) then
-                t = t:gsub(k, v)
-                changed = true
-            end
-        end
-        if changed then translated = t end
-    end
-
-    if translated and translated ~= text then
-        obj.Text = translated
-    end
-end
-
--- ===== 普通模式（轮询）: 真正扫描并翻译所有 GUI =====
-local function PollTranslateOnce()
-    -- 扫描 PlayerGui 全部子树（游戏/脚本 UI 都在这里）
-    if PlayerGui then
-        for _, obj in ipairs(getTextRecursive(PlayerGui)) do
-            pcall(TranslateObject, obj)
-        end
-    end
-    -- 扫描 CoreGui 下的非系统子树（有些执行器创建的 UI 在 CoreGui）
+local function TranslateObj(obj)
+    if IsSysUI(obj) or TranslatingObjects[obj] then return end
+    TranslatingObjects[obj] = true
     pcall(function()
-        for _, child in ipairs(CoreGui:GetChildren()) do
-            if not isSystemUi(child) then
-                for _, obj in ipairs(getTextRecursive(child)) do
-                    pcall(TranslateObject, obj)
-                end
-            end
+        local nText = TranslateText(obj.Text)
+        if nText ~= obj.Text then obj.Text = nText end
+        local nPlace = TranslateText(obj.PlaceholderText)
+        if nPlace ~= obj.PlaceholderText then obj.PlaceholderText = nPlace end
+    end)
+    TranslatingObjects[obj] = nil
+end
+
+local function WatchObj(obj)
+    if not (obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox")) then return end
+    if WatchedObjects[obj] then return end
+    WatchedObjects[obj] = true
+
+    TranslateObj(obj)
+
+    local function onPropChange()
+        if not TranslatingObjects[obj] then
+            delay(0.03, function() TranslateObj(obj) end)
         end
+    end
+
+    pcall(function()
+        obj:GetPropertyChangedSignal("Text"):Connect(onPropChange)
+        obj:GetPropertyChangedSignal("PlaceholderText"):Connect(onPropChange)
     end)
 end
 
-local PollingThreadActive = false
-local function StartPolling()
-    if PollingThreadActive then return end
-    PollingThreadActive = true
-    print("[汉化] 轮询翻译已启动（每 0.5 秒扫描一次）")
-    task.spawn(function()
-        while task.wait(0.5) do
-            pcall(PollTranslateOnce)
+local function GetRoots()
+    local roots = {}
+    if PlayerGui then table.insert(roots, PlayerGui) end
+    pcall(function() table.insert(roots, CoreGui) end)
+    pcall(function()
+        if gethui then
+            local hui = gethui()
+            if hui then table.insert(roots, hui) end
         end
+    end)
+    return roots
+end
+
+local function ScanAndWatch(root)
+    if not root or WatchedRoots[root] then return end
+    WatchedRoots[root] = true
+
+    pcall(function()
+        for _, obj in ipairs(root:GetDescendants()) do
+            WatchObj(obj)
+        end
+        root.DescendantAdded:Connect(function(obj)
+            delay(0.05, function()
+                WatchObj(obj)
+                pcall(function()
+                    for _, c in ipairs(obj:GetDescendants()) do
+                        WatchObj(c)
+                    end
+                end)
+            end)
+        end)
     end)
 end
 
--- ===== Hook模式（高性能，需执行器支持 HookText）=====
-local function ApplyHookTranslation()
-    local hook = getgenv and getgenv().HookText or nil
-    if not hook then
-        warn("[汉化] 未找到 HookText，回退到轮询模式")
-        return false
-    end
-    local hooked = false
-    local originalSet = hook.Set
-    hook.Set = function(self, text)
-        local translated = text
-        -- 先尝试精确翻译
-        for k, v in pairs(Translations) do
-            if text == k then translated = v; break end
-        end
-        -- 再尝试部分翻译
-        if translated == text then
-            for k, v in pairs(PartialTranslations) do
-                translated = translated:gsub(k, v)
-            end
-        end
-        originalSet(self, translated)
-    end
-    hooked = true
-    print("[汉化] Hook 翻译已挂载")
-    return hooked
-end
-
+-- ===== 如果用户选择了 Hook 模式，尝试安装 =====
+local hookInstalled = false
 if UseHookTranslation then
-    if not ApplyHookTranslation() then
-        warn("[汉化] Hook 翻译失败，使用轮询模式")
-        StartPolling()
+    local hookSuccess, hookErr = pcall(function()
+        local mt = getrawmetatable(game)
+        if not mt then error("getrawmetatable 失败") end
+        local oldNewIndex = mt.__newindex
+        -- 兼容没有 newcclosure 的执行器
+        local wrap = newcclosure or function(f) return f end
+        setreadonly(mt, false)
+        mt.__newindex = wrap(function(t, k, v)
+            -- 只处理 Instance 上的 Text/PlaceholderText，避免非 Instance 调用 IsA 报错
+            if (k == "Text" or k == "PlaceholderText") and typeof(t) == "Instance"
+               and (t:IsA("TextLabel") or t:IsA("TextButton") or t:IsA("TextBox"))
+               and not IsSysUI(t) then
+                v = TranslateText(tostring(v))
+            end
+            if oldNewIndex then
+                return oldNewIndex(t, k, v)
+            end
+            return rawset(t, k, v)
+        end)
+        setreadonly(mt, true)
+    end)
+    if not hookSuccess then
+        warn("[汉化] Hook安装失败，降级为监听模式:", hookErr)
+        UseHookTranslation = false
+        hookInstalled = false
+    else
+        print("[汉化] Hook模式已启用")
+        hookInstalled = true
     end
 else
-    StartPolling()
+    print("[汉化] 使用普通监听模式")
 end
+
+-- ===== 启动监听扫描（即使 Hook 成功也保留作为备用） =====
+spawn(function()
+    -- 先立即全扫一遍：确保外部脚本刚创建的 UI 也能立刻被翻译（不等第一个周期）
+    for _, root in ipairs(GetRoots()) do
+        ScanAndWatch(root)
+        pcall(function()
+            for _, obj in ipairs(root:GetDescendants()) do
+                WatchObj(obj)
+            end
+        end)
+    end
+    while true do
+        wait(hookInstalled and 20 or 8)
+        for _, root in ipairs(GetRoots()) do
+            ScanAndWatch(root)
+            pcall(function()
+                for _, obj in ipairs(root:GetDescendants()) do
+                    WatchObj(obj)
+                end
+            end)
+        end
+    end
+end)
+
+wait(0.5)
 
 -- ===== 加载外部脚本 =====
 local ScriptUrl = "https://pastebin.com/raw/EL0LxJhh"
@@ -490,18 +513,7 @@ else
         warn("[汉化] 内容为空")
     else
         print("[汉化] 下载成功，长度：", #content)
-        -- 兼容：若返回的是 HTML 包装页（paste-drop 之类），提取代码块
-        local code = content
-        if content:find("<", 1, true) and content:find("class=\"content\"", 1, true) then
-            local _, s = content:find("class=\"content\"", 1, true)
-            local _, e = content:find("</div>", s, true)
-            if e then
-                code = content:sub(s + 1, e - 1)
-                code = code:gsub("&quot;", '"'):gsub("&#39;", "'"):gsub("&amp;", "&")
-                print("[汉化] 已从 HTML 提取代码，长度：", #code)
-            end
-        end
-        local func, err = loadstring(code)
+        local func, err = loadstring(content)
         if not func then
             warn("[汉化] 编译失败：", err)
         else
