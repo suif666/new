@@ -353,8 +353,8 @@ end)
 wait(0.5)
 
 -- ===== 加载外部脚本 =====
-local ScriptUrl = ""
-if ScriptUrl == "https://raw.githubusercontent.com/CyrusOffc/scriptcyrus/refs/heads/main/loader" then
+local ScriptUrl = "https://raw.githubusercontent.com/CyrusOffc/scriptcyrus/refs/heads/main/loader"
+if ScriptUrl == "" then
     warn("[汉化] 外部脚本 URL 未填写，跳过外部脚本加载")
 else
     print("[汉化] 开始下载外部脚本...")
